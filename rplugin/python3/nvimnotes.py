@@ -5,6 +5,74 @@ import time
 import re
 from pathlib import Path
 
+
+@pynvim.plugin
+class NvimNotes(object):
+
+    def __init__(self, nvim):
+        self.nvim = nvim
+
+        # initialize settings from init.vim
+        self._slide_section_str = self.nvim.eval('g:nvimnotes_slide_format')
+        self._pdf_in_yaml = 1 == int(self.nvim.eval('g:nvimnotes_pdf_in_yaml'))
+        if not self._pdf_in_yaml:
+            self._pdf_section_str = self.nvim.eval('g:nvimnotes_pdf_section_format')
+
+    def get_line(self, pattern: str, flags: str) -> int:
+        # uses vim-style regex to search
+        row, col = self.nvim.funcs.searchpos(pattern, flags)
+        return (row - 1)
+
+    def write_err(self, err: str):
+        self.nvim.err_write(err + '\n')
+
+    def write_msg(self, msg: str):
+        self.nvim.msg_write(msg + '\n')
+
+    @pynvim.command('Annotate', nargs='?')
+    def annotate(self, args):
+        """Search back for """
+        if len(args) > 0:
+            filename = args[0]
+        else:
+            filename = self.get_filename()
+        try:
+            self.interface = Interface(filename)
+        except FileNotFoundError as err_fnf:
+            self.write_err(str(err_fnf))
+        except OSError as err_non_pdf:
+            self.write_err(str(err_non_pdf))
+        else:
+            self.interface.open()
+
+    def get_filename(self) -> str:
+        buffer = self.nvim.current.buffer
+        if self._pdf_in_yaml:
+            pattern = r'^pdf: "?(.*pdf)"?$'
+            pattern_vim = self.vimify_regex(pattern)
+            yaml_pat = re.compile(pattern)
+
+            file_ln = self.get_line(pattern_vim, 'bnc')
+            file = buffer[file_ln]
+
+            filename = yaml_pat.search(file).group(1)
+
+        elif self._pdf_section_str:
+            pattern_vim = self.vimify_regex(self._pdf_section_str)
+            file_ln = self.get_line(pattern_vim)
+            file = buffer[file_ln]
+            section_pat = re.compile(self._pdf_section_str)
+            filename = section_pat.search(file).group(1)
+        return filename
+
+
+    def vimify_regex(self, pattern: str) -> str:
+        """Non-exhaustive function to convert python regex to vim regex"""
+        newpat = pattern.replace('?', r'\=').replace('(', r'\)').replace(')', r'\)')
+        return newpat
+
+
+
 class Interface:
 
     def __init__(self, filename: str):

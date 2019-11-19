@@ -1,0 +1,49 @@
+---
+pdf: "test.pdf"
+
+---
+features of nvimnotes
+
+- can read the yaml at the top of the page to open the right PDF
+- start taking notes on the pdf with ":Annotate"
+    - if there's no yaml with a pdf name, have to pass an argument
+    - maybe allow for multiple notes in the same document?
+    - use H1 (#) (or user-specified format) to choose the file that :Annotate will
+    open (use the one most recently backwards)
+- maybe a way to change the format of the slide headers through vimrc settings?
+    - let the user specify a string with "%d" in it which will be used to insert
+    the slide number
+- assume that we're going with the md format
+
+## Slide {num}
+
+- notes
+
+## Slide {num + 1}
+
+- notes
+
+
+If you are on a slide in the pdf, should be able to start taking notes with a
+shortcut (i.e. :NewNote)
+
+Should also be able to be on a page, and start taking notes on the next page
+:NextNote
+- if there's a note for the next page, will just go to the end of the note for
+that page
+- if there isn't a note for the next page, will create it (with the header)
+- just inserts lines, doesn't change lines (this is possible, right? reference the
+:AddSubNumber)
+- same thing for :PrevNote -- if no previous note, will create it (inserting
+lines, not changing lines), if exists, will go to it
+- also, changing the note with this will also change the PDF position
+- checks to see if that page in the PDF exists before doing anything!
+
+- also want to control the PDF without moving in the notes
+- use :PrevPage and :NextPage
+- this means that the notes will get out of sync with the pdf
+- use :SyncPage to sync the pdf with the location of the cursor in the notes
+- use :SyncNotes to sync the notes with the position of the notes (i.e. current
+note page)
+
+
