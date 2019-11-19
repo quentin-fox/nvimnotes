@@ -65,7 +65,6 @@ class NvimNotes(object):
             filename = section_pat.search(file).group(1)
         return filename
 
-
     def vimify_regex(self, pattern: str) -> str:
         """Non-exhaustive function to convert python regex to vim regex"""
         newpat = pattern.replace('?', r'\=').replace('(', r'\(').replace(')', r'\)')
