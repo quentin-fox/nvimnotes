@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 @pynvim.plugin
-class NvimNotes(object):
+class NvimnotesPlugin(object):
 
     def __init__(self, nvim):
         self.nvim = nvim
@@ -70,6 +70,20 @@ class NvimNotes(object):
         newpat = pattern.replace('?', r'\=').replace('(', r'\(').replace(')', r'\)')
         return newpat
 
+    @pynvim.command('GoPage', nargs=1)
+    def go_page(self, args):
+        new_page = args[0]  # defers type handling to interface
+        try:
+            self.interface.current_page = new_page
+        except TypeError as err:
+            self.write_err(str(err))
+        except IndexError as err:
+            self.write_err(str(err))
+
+    @pynvim.command('CreatePageNote')
+    def create_page_note(self):
+        current_page = self.interface.current_page
+        self.nvim.current.line = self._slide_section_str % current_page
 
 
 class Interface:
@@ -126,14 +140,17 @@ class Interface:
         return self._current_page
 
     @current_page.setter
-    def current_page(self, page: int):
-        if not isinstance(page, int):
+    def current_page(self, page):
+        try:
+            page = int(page)
+        except ValueError:
             raise TypeError(f'Page number must be an integer')
-        elif page not in self._page_range:
-            raise IndexError(f'Page number must be between 1 and {max(self._page_range)}')
         else:
-            self._send_command(f'gotoPage({page})')
-            self._current_page = page
+            if page not in self._page_range:
+                raise IndexError(f'Page number must be between 1 and {max(self._page_range)}')
+            else:
+                self._send_command(f'gotoPage({page})')
+                self._current_page = page
 
     def next_page(self):
         self._send_command('nextPage')
