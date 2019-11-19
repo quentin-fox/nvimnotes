@@ -59,7 +59,7 @@ class NvimNotes(object):
 
         elif self._pdf_section_str:
             pattern_vim = self.vimify_regex(self._pdf_section_str)
-            file_ln = self.get_line(pattern_vim)
+            file_ln = self.get_line(pattern_vim, 'bnc')
             file = buffer[file_ln]
             section_pat = re.compile(self._pdf_section_str)
             filename = section_pat.search(file).group(1)
