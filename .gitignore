@@ -1,0 +1,6 @@
+.DS_Store
+*.md
+*.pdf
+venv/
+__pycache__/
+
