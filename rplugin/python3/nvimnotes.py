@@ -15,9 +15,16 @@ class NvimNotes(object):
     def get_settings(self):
         """Initializes settings from init.vim, called during :Annotate"""
         self._slide_section_str = self.nvim.eval('g:nvimnotes_slide_format')
+        self._bullet_at_new_note = 1 == int(self.nvim.eval('g:nvimnotes_bullet_at_new_note'))
         self._pdf_in_yaml = 1 == int(self.nvim.eval('g:nvimnotes_pdf_in_yaml'))
         if not self._pdf_in_yaml:
             self._pdf_section_str = self.nvim.eval('g:nvimnotes_pdf_section_format')
+
+    def last_non_blank_line(self, line):
+        if self.nvim.current.buffer[line]:
+            return(line)
+        else:
+            return(self.last_non_blank_line(line - 1))
 
     def get_line(self, pattern: str, flags: str) -> int:
         # uses vim-style regex to search
@@ -40,18 +47,20 @@ class NvimNotes(object):
         return matching
 
     def get_pdf_range(self):
-        pdf_rng = self.get_match_ranges(pattern=self._pdf_section_str, unique=self.filename)
+        pdf_rng = self.get_match_range(pattern=self._pdf_section_str, unique=self.filename)
         return pdf_rng
 
     def get_slide_pos_in_notes(self, slide: int) -> int:
         pdf_rng = self.get_pdf_range()
         slide_pattern = self._slide_section_str.replace('%d', r'\d*')
         slide_unique = self._slide_section_str % slide
-        slide_rng = self._get_match_ranges(slide_pattern, slide_unique, pdf_rng)
-        return max(slide_rng)
+        slide_rng = self.get_match_range(slide_pattern, slide_unique, pdf_rng)
+        if max(slide_rng) < max(pdf_rng):
+            return max(slide_rng)
+        else:
+            return max(pdf_rng)
 
-
-    def get_match_ranges(self, pattern: str, unique: str, ln_range=None) -> range:
+    def get_match_range(self, pattern: str, unique: str, ln_range=None) -> range:
         """Divides the buffer up into sections separated by lines that match a specific regex, then returns the range (of lines) that corresponds to the section whose separator contains a unique strin
         Args:
             pattern: the regex used to split up the buffer into sections
@@ -101,6 +110,13 @@ class NvimNotes(object):
             section_pat = re.compile(self._pdf_section_str)
             filename = section_pat.search(file).group(1)
         return filename
+
+    @pynvim.command('FindCurrentPageNotes')
+    def find_current_page_notes(self):
+        cp = self.interface.current_page
+        note_end_ln = self.get_slide_pos_in_notes(slide=cp)
+        last_note_line = self.last_non_blank_line(note_end_ln)
+        self.nvim.current.window.cursor = (last_note_line + 1, 1)
 
     def vimify_regex(self, pattern: str) -> str:
         """Non-exhaustive function to convert python regex to vim regex"""
