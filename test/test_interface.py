@@ -11,7 +11,7 @@ class TestInterface:
 
     @pytest.fixture(scope='class')
     def open_xpdf(self):
-        i = Interface('test.pdf')
+        i = Interface('pdfs/test.pdf')
         i.open()
         yield i
         i.quit()
@@ -26,7 +26,7 @@ class TestInterface:
 
     def test_non_pdf(self):
         with pytest.raises(OSError, match=".* is not a pdf file."):
-            Interface('test.txt')
+            Interface('pdfs/test.txt')
 
     def test_change_page(self, open_xpdf):
         i = open_xpdf
@@ -42,20 +42,3 @@ class TestInterface:
         with pytest.raises(IndexError, match="Page number must be between 1 and .*"):
             i.current_page = 22
 
-    def test_next_page(self, open_xpdf):
-        i = open_xpdf
-        i.current_page = 1
-        i.next_page()
-        assert i.current_page == 2
-        i.current_page = max(i._page_range)
-        i.next_page()
-        assert i.current_page == max(i._page_range)
-
-    def test_prev_page(self, open_xpdf):
-        i = open_xpdf
-        i.current_page = 2
-        i.prev_page()
-        assert i.current_page == 1
-        i. current_page = 1
-        i.prev_page()
-        assert i.current_page == 1

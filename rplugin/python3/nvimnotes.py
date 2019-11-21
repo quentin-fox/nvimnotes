@@ -7,12 +7,13 @@ from pathlib import Path
 
 
 @pynvim.plugin
-class NvimnotesPlugin(object):
+class NvimNotes(object):
 
     def __init__(self, nvim):
         self.nvim = nvim
 
-        # initialize settings from init.vim
+    def get_settings(self):
+        """Initializes settings from init.vim, called during :Annotate"""
         self._slide_section_str = self.nvim.eval('g:nvimnotes_slide_format')
         self._pdf_in_yaml = 1 == int(self.nvim.eval('g:nvimnotes_pdf_in_yaml'))
         if not self._pdf_in_yaml:
@@ -29,19 +30,55 @@ class NvimnotesPlugin(object):
     def write_msg(self, msg: str):
         self.nvim.msg_write(msg + '\n')
 
+    def get_matching_lines(self, pattern: str, ln_range=None) -> tuple:
+        buffer = self.nvim.current.buffer
+        pat = re.compile(pattern)
+        if not ln_range:
+            matching = [(i, txt) for i, txt in enumerate(buffer) if pat.match(txt)]
+        else:
+            matching = [(i, txt) for i, txt in enumerate(buffer) if pat.match(txt) and i in ln_range]
+        return matching
+
+    def get_pdf_range(self):
+        pdf_rng = self.get_match_ranges(pattern=self._pdf_section_str, unique=self.filename)
+        return pdf_rng
+
+    def get_slide_pos_in_notes(self, slide: int) -> int:
+        pdf_rng = self.get_pdf_range()
+        slide_pattern = self._slide_section_str.replace('%d', r'\d*')
+        slide_unique = self._slide_section_str % slide
+        slide_rng = self._get_match_ranges(slide_pattern, slide_unique, pdf_rng)
+        return max(slide_rng)
+
+
+    def get_match_ranges(self, pattern: str, unique: str, ln_range=None) -> range:
+        """Divides the buffer up into sections separated by lines that match a specific regex, then returns the range (of lines) that corresponds to the section whose separator contains a unique strin
+        Args:
+            pattern: the regex used to split up the buffer into sections
+            unique: the string that uniquely identifies one of the separators
+            ln_range: the range of lines that will be split up into sections"""
+        buflen = len(self.nvim.current.buffer)
+        match_lines = self.get_matching_lines(pattern, ln_range=ln_range)
+
+        # will be a list of tuples, tuples have the range for each pdf in the .notes file
+        range_lines = []
+        for i, tup in enumerate(match_lines):
+            startln, txt = tup
+            stopln = match_lines[i + 1][0] if i < (len(match_lines) - 1) else buflen
+            newtup = (range(startln, stopln), txt)
+            range_lines.append(newtup)
+
+        pdf_range = next(rng for rng, pdfline in range_lines if unique in pdfline)
+        return pdf_range
+
     @pynvim.command('Annotate', nargs='?')
     def annotate(self, args):
-        """Search back for """
-        if len(args) > 0:
-            filename = args[0]
-        else:
-            filename = self.get_filename()
+        self.get_settings()
+        self.filename = args[0] if len(args) > 0 else self.get_filename()
         try:
-            self.interface = Interface(filename)
-        except FileNotFoundError as err_fnf:
-            self.write_err(str(err_fnf))
-        except OSError as err_non_pdf:
-            self.write_err(str(err_non_pdf))
+            self.interface = Interface(self.filename)
+        except (FileNotFoundError, OSError) as err:
+            self.write_err(str(err))
         else:
             self.interface.open()
 
@@ -85,13 +122,26 @@ class NvimnotesPlugin(object):
         current_page = self.interface.current_page
         self.nvim.current.line = self._slide_section_str % current_page
 
+    @pynvim.command('NextPage')
+    def next_page(self):
+        self.interface.next_page()
+
+    @pynvim.command('PrevPage')
+    def prev_page(self):
+        self.interface.prev_page()
+
+    @pynvim.command('CurrentPage')
+    def current_page(self):
+        cp = self.interface.current_page
+        self.write_err(str(cp))
+
 
 class Interface:
 
     def __init__(self, filename: str):
         f = Path(filename)
         if not f.exists():
-            raise FileNotFoundError(f'{filename} could not be find in the working directory')
+            raise FileNotFoundError(f'{filename} could not be found in the working directory')
         elif f.suffix != '.pdf':
             raise OSError(f'{filename} is not a pdf file.')
         else:
@@ -154,24 +204,22 @@ class Interface:
 
     def next_page(self):
         self._send_command('nextPage')
-        if self._current_page + 1 in self._page_range:
+        if (self._current_page + 1) in self._page_range:
             self._current_page += 1
 
     def prev_page(self):
-        if self._current_page - 1 in self._page_range:
-            self._current_page -= 1
+        self._send_command('prevPage')
+        if (self._current_page - 1) in self._page_range:
+            self._current_page += 1
 
     def quit(self):
         self._send_command('quit')
 
 
-
-
-
-
-
 if __name__ == '__main__':
-    i = Interface('test.pdf')
-    i.open()
+    from pynvim import attach
+    nvim = attach('socket', path='/tmp/nvim')
+    nn = NvimNotes(nvim)
+    nn.annotate(args=[])
 
 
