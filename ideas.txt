@@ -47,3 +47,19 @@ lines, not changing lines), if exists, will go to it
 note page)
 
 
+### Pattern
+
+get_matching_lines gets all the lines that match a specific pattern in a given
+range
+get_match_range gets the range between regex matches, and then gets a specific
+range using a unique string, uses output from get_matching_lines
+
+
+get_pdf_range uses get_match_range to find the range for the current pdf
+
+get_slide_rng_in_notes uses get_match_range with the current slide number and
+slide pattern, restricting search to the range of the current pdf from
+get_pdf_range
+
+get_previous_slide
+

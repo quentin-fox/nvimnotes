@@ -7,4 +7,6 @@ let g:nvimnotes_bullet_at_new_note=1
 if !get(g:, 'nvimnotes_no_default_key_mappings', 0)
     nnoremap <silent> = :execute "NextPage"<Cr>
     nnoremap <silent> - :execute "PrevPage"<Cr>
+    nnoremap <silent> <Bar> :execute "FindPageFromNote"<Cr>
+    nnoremap <silent> <Cr> :execute "FindNoteFromPage"
 endif

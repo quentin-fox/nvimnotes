@@ -12,6 +12,7 @@ class NvimNotes(object):
     def __init__(self, nvim):
         self.nvim = nvim
 
+    # core plugin functions
     def get_settings(self):
         """Initializes settings from init.vim, called during :Annotate"""
         self._slide_section_str = self.nvim.eval('g:nvimnotes_slide_format')
@@ -20,22 +21,86 @@ class NvimNotes(object):
         if not self._pdf_in_yaml:
             self._pdf_section_str = self.nvim.eval('g:nvimnotes_pdf_section_format')
 
-    def last_non_blank_line(self, line):
-        if self.nvim.current.buffer[line]:
-            return(line)
-        else:
-            return(self.last_non_blank_line(line - 1))
+    def write_err(self, err: str):
+        self.nvim.err_write(err + '\n')
+
+    def write_msg(self, msg: str):
+        self.nvim.msg_write(msg + '\n')
 
     def get_line(self, pattern: str, flags: str) -> int:
         # uses vim-style regex to search
         row, col = self.nvim.funcs.searchpos(pattern, flags)
         return (row - 1)
 
-    def write_err(self, err: str):
-        self.nvim.err_write(err + '\n')
+    # nvim command methods
+    @pynvim.command('Annotate', nargs='?')
+    def annotate(self, args):
+        self.get_settings()
+        self.filename = args[0] if len(args) > 0 else self.get_filename()
+        try:
+            self.interface = Interface(self.filename)
+        except (FileNotFoundError, OSError) as err:
+            self.write_err(str(err))
+        else:
+            self.interface.open()
 
-    def write_msg(self, msg: str):
-        self.nvim.msg_write(msg + '\n')
+    # nvim commands
+    @pynvim.command('FindNotesFromPage')
+    def find_notes_from_page(self):
+        cp = self.interface.current_page
+        self.make_slide_note(cp)
+
+    @pynvim.command('FindPageFromNotes')
+    def find_page_from_notes(self):
+        buffer = self.nvim.current.buffer
+        """Goes to the slide in the pdf that corresponds to the current slide note"""
+        note_section_pat = self._slide_section_str.replace('%d', r'\d\+')
+        note_match = buffer[self.get_line(note_section_pat, 'bnc')]
+        int_extractor = re.compile(note_section_pat.replace(r'\d\+', r'(\d+)'))
+        current_note = int(int_extractor.search(note_match).group(1))
+
+        try:
+            self.interface.current_page = current_note
+        except (TypeError, IndexError) as err:
+            self.write_err(str(err))
+
+
+    @pynvim.command('GoPage', nargs=1)
+    def go_page(self, args):
+        new_page = args[0]  # defers type handling to interface
+        try:
+            self.interface.current_page = new_page
+        except (TypeError, IndexError) as err:
+            self.write_err(str(err))
+
+    # @pynvim.command('CreatePageNote')
+    # def create_page_note(self):
+    #     current_page = self.interface.current_page
+    #     self.nvim.current.line = self._slide_section_str % current_page
+
+    @pynvim.command('NextPage')
+    def next_page(self):
+        self.interface.next_page()
+
+    @pynvim.command('PrevPage')
+    def prev_page(self):
+        self.interface.prev_page()
+
+
+    # plugin logic methods
+    def vimify_regex(self, pattern: str) -> str:
+        """Non-exhaustive function to convert python regex to vim regex"""
+        newpat = pattern.replace('?', r'\=').replace('(', r'\(').replace(')', r'\)')
+        return newpat
+
+    def last_non_blank_line(self, line: int) -> int:
+        """Finds the last (i.e. searching up the buffer) line that isn't empty, starting at a given line, calls itself recursively"""
+        if line == 0:
+            return
+        elif self.nvim.current.buffer[line] != '':
+            return line
+        else:
+            return self.last_non_blank_line(line - 1)
 
     def get_matching_lines(self, pattern: str, ln_range=None) -> tuple:
         buffer = self.nvim.current.buffer
@@ -46,19 +111,63 @@ class NvimNotes(object):
             matching = [(i, txt) for i, txt in enumerate(buffer) if pat.match(txt) and i in ln_range]
         return matching
 
-    def get_pdf_range(self):
-        pdf_rng = self.get_match_range(pattern=self._pdf_section_str, unique=self.filename)
-        return pdf_rng
+    def get_pdf_range(self) -> range:
+        buflen = len(self.nvim.current.buffer)
+        """Returns the range of lines that corresponds to the notes for a given PDF file
+        min(pdf_rng) includes the pdf header
+        max(pdf_rng) includes the last line before the next pdf header"""
+        if self._pdf_in_yaml:
+            return range(1, buflen)
+        else:
+            pdf_rng = self.get_match_range(pattern=self._pdf_section_str, unique=self.filename)
+            return pdf_rng
 
-    def get_slide_pos_in_notes(self, slide: int) -> int:
+    def get_slide_note_rng(self, slide: int) -> range:
+        """For a given slide in a given pdf, find the range in the buffer for its note
+        Includes slide header, runs until the last line before the next slide header"""
         pdf_rng = self.get_pdf_range()
         slide_pattern = self._slide_section_str.replace('%d', r'\d*')
         slide_unique = self._slide_section_str % slide
         slide_rng = self.get_match_range(slide_pattern, slide_unique, pdf_rng)
-        if max(slide_rng) < max(pdf_rng):
-            return max(slide_rng)
+        if not slide_rng:
+            return None  # no slide found for the slide int passed as arg
+        elif max(slide_rng) < max(pdf_rng):
+            return slide_rng
+        else:  # needed when looking for the last slide in a pdf section
+            return range(min(slide_rng), max(pdf_rng))
+
+    def last_slide_note(self, slide: int) -> int:
+        """Recursively searches for the highest slide note present before the slide passed as arg, returns that slide number"""
+        if slide == 0:
+            return
+        elif self.get_slide_note_rng(slide):
+            return slide
         else:
-            return max(pdf_rng)
+            return self.last_slide_note(slide - 1)
+
+    def go_slide_note(self, slide: int):
+        note_rng = self.get_slide_note_rng(slide)
+        note_end_ln = max(note_rng)
+        last_note_line = self.last_non_blank_line(note_end_ln)
+        self.nvim.current.window.cursor = (last_note_line + 1, 0)
+
+    def make_slide_note(self, slide: int):
+        """If there is a slide note present, go to the end of that slide's notes
+        If no slide note present, create a new slide note after the last slide note before the current slide note TODO phrase this better"""
+        buffer = self.nvim.current.buffer
+        if self.get_slide_note_rng(slide):
+            self.go_slide_note(slide)
+        else:
+            last_slide = self.last_slide_note(slide)
+            insert_ln = max(self.get_slide_note_rng(last_slide)) + 1
+            slide_header = [self._slide_section_str % slide, '', '- ', '']
+            # padding space before header
+            if insert_ln == max(self.get_pdf_range()):
+                insert_ln += 1
+            if buffer[insert_ln - 1] != '':
+                slide_header.insert(0, '')
+            buffer[insert_ln:insert_ln] = slide_header
+            self.go_slide_note(slide)
 
     def get_match_range(self, pattern: str, unique: str, ln_range=None) -> range:
         """Divides the buffer up into sections separated by lines that match a specific regex, then returns the range (of lines) that corresponds to the section whose separator contains a unique strin
@@ -77,21 +186,15 @@ class NvimNotes(object):
             newtup = (range(startln, stopln), txt)
             range_lines.append(newtup)
 
-        pdf_range = next(rng for rng, pdfline in range_lines if unique in pdfline)
-        return pdf_range
-
-    @pynvim.command('Annotate', nargs='?')
-    def annotate(self, args):
-        self.get_settings()
-        self.filename = args[0] if len(args) > 0 else self.get_filename()
         try:
-            self.interface = Interface(self.filename)
-        except (FileNotFoundError, OSError) as err:
-            self.write_err(str(err))
-        else:
-            self.interface.open()
+            match_range = next(rng for rng, line in range_lines if unique in line)
+        except StopIteration:
+            match_range = None
+        return match_range
+
 
     def get_filename(self) -> str:
+        """Finds the filename according to settings in init.vim"""
         buffer = self.nvim.current.buffer
         if self._pdf_in_yaml:
             pattern = r'^pdf: "?(.*pdf)"?$'
@@ -111,45 +214,6 @@ class NvimNotes(object):
             filename = section_pat.search(file).group(1)
         return filename
 
-    @pynvim.command('FindCurrentPageNotes')
-    def find_current_page_notes(self):
-        cp = self.interface.current_page
-        note_end_ln = self.get_slide_pos_in_notes(slide=cp)
-        last_note_line = self.last_non_blank_line(note_end_ln)
-        self.nvim.current.window.cursor = (last_note_line + 1, 1)
-
-    def vimify_regex(self, pattern: str) -> str:
-        """Non-exhaustive function to convert python regex to vim regex"""
-        newpat = pattern.replace('?', r'\=').replace('(', r'\(').replace(')', r'\)')
-        return newpat
-
-    @pynvim.command('GoPage', nargs=1)
-    def go_page(self, args):
-        new_page = args[0]  # defers type handling to interface
-        try:
-            self.interface.current_page = new_page
-        except TypeError as err:
-            self.write_err(str(err))
-        except IndexError as err:
-            self.write_err(str(err))
-
-    @pynvim.command('CreatePageNote')
-    def create_page_note(self):
-        current_page = self.interface.current_page
-        self.nvim.current.line = self._slide_section_str % current_page
-
-    @pynvim.command('NextPage')
-    def next_page(self):
-        self.interface.next_page()
-
-    @pynvim.command('PrevPage')
-    def prev_page(self):
-        self.interface.prev_page()
-
-    @pynvim.command('CurrentPage')
-    def current_page(self):
-        cp = self.interface.current_page
-        self.write_err(str(cp))
 
 
 class Interface:
@@ -226,7 +290,7 @@ class Interface:
     def prev_page(self):
         self._send_command('prevPage')
         if (self._current_page - 1) in self._page_range:
-            self._current_page += 1
+            self._current_page -= 1
 
     def quit(self):
         self._send_command('quit')
@@ -237,5 +301,6 @@ if __name__ == '__main__':
     nvim = attach('socket', path='/tmp/nvim')
     nn = NvimNotes(nvim)
     nn.annotate(args=[])
+    buffer = nn.nvim.current.buffer
 
 
